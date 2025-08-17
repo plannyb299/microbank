@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: microbank-postgres
+    environment:
+      POSTGRES_DB: microbank
+      POSTGRES_USER: microbank
+      POSTGRES_PASSWORD: microbank
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - microbank-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U microbank"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Keycloak Identity Management
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: microbank-keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: microbank
+      KC_DB_PASSWORD: microbank
+      KC_HOSTNAME: localhost
+      KC_HTTP_ENABLED: true
+      KC_HTTP_RELATIVE_PATH: /auth
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microbank-network
+    command: start-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/auth/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: microbank-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - client-service
+      - banking-service
+    networks:
+      - microbank-network
+
+  # Client Service
+  client-service:
+    build:
+      context: ../services/client-service
+      dockerfile: Dockerfile
+    container_name: microbank-client-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/microbank
+      SPRING_DATASOURCE_USERNAME: microbank
+      SPRING_DATASOURCE_PASSWORD: microbank
+      JWT_SECRET: microbank-secret-key-2024-very-long-and-secure-key-for-production
+      JWT_EXPIRATION: 86400000
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microbank-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/client-service/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Banking Service
+  banking-service:
+    build:
+      context: ../services/banking-service
+      dockerfile: Dockerfile
+    container_name: microbank-banking-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/microbank
+      SPRING_DATASOURCE_USERNAME: microbank
+      SPRING_DATASOURCE_PASSWORD: microbank
+      CLIENT_SERVICE_URL: http://client-service:8081
+    ports:
+      - "8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      client-service:
+        condition: service_healthy
+    networks:
+      - microbank-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/banking-service/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # React Client Frontend
+  client-frontend:
+    build:
+      context: ../client
+      dockerfile: Dockerfile
+    container_name: microbank-client-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      REACT_APP_API_URL: http://localhost:8081/client-service
+      REACT_APP_BANKING_API_URL: http://localhost:8082/banking-service
+    depends_on:
+      - client-service
+      - banking-service
+    networks:
+      - microbank-network
+
+volumes:
+  postgres_data:
+
+networks:
+  microbank-network:
+    driver: bridge

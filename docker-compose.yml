@@ -1,0 +1,187 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: microbank-postgres
+    environment:
+      POSTGRES_DB: microbank
+      POSTGRES_USER: microbank
+      POSTGRES_PASSWORD: microbank123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - microbank-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U microbank -d microbank"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Gateway Service
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: microbank-api-gateway
+    ports:
+      - "8083:8083"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/microbank
+      SPRING_DATASOURCE_USERNAME: microbank
+      SPRING_DATASOURCE_PASSWORD: microbank123
+    depends_on:
+      postgres:
+        condition: service_healthy
+      client-service:
+        condition: service_started
+      banking-service:
+        condition: service_started
+    networks:
+      - microbank-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8083/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Client Service
+  client-service:
+    build:
+      context: ./services/client-service
+      dockerfile: Dockerfile
+    container_name: microbank-client-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/microbank
+      SPRING_DATASOURCE_USERNAME: microbank
+      SPRING_DATASOURCE_PASSWORD: microbank123
+      JWT_SECRET: microbank-jwt-secret-key-2024-very-long-and-secure
+      JWT_EXPIRATION: 86400000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microbank-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Banking Service
+  banking-service:
+    build:
+      context: ./services/banking-service
+      dockerfile: Dockerfile
+    container_name: microbank-banking-service
+    ports:
+      - "8082:8082"
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/microbank
+      SPRING_DATASOURCE_USERNAME: microbank
+      SPRING_DATASOURCE_PASSWORD: microbank123
+      JWT_SECRET: microbank-jwt-secret-key-2024-very-long-and-secure
+      JWT_EXPIRATION: 86400000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - microbank-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frontend Client
+  client-frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile
+    container_name: microbank-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - microbank-network
+    environment:
+      REACT_APP_API_BASE_URL: http://localhost:8083
+      REACT_APP_CLIENT_SERVICE_URL: http://localhost:8083/api/v1
+      REACT_APP_BANKING_SERVICE_URL: http://localhost:8083/api/v1
+
+  # Nginx Reverse Proxy (Optional - can be used instead of API Gateway)
+  nginx:
+    image: nginx:alpine
+    container_name: microbank-nginx
+    ports:
+      - "80:80"
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./client/build:/usr/share/nginx/html:ro
+    depends_on:
+      - client-service
+      - banking-service
+      - client-frontend
+    networks:
+      - microbank-network
+    profiles:
+      - nginx-only
+
+  # Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: microbank-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - api-gateway
+      - client-service
+      - banking-service
+    networks:
+      - microbank-network
+    profiles:
+      - monitoring
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: microbank-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - microbank-network
+    profiles:
+      - monitoring
+
+volumes:
+  postgres_data:
+
+networks:
+  microbank-network:
+    driver: bridge

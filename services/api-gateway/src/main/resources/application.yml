@@ -1,0 +1,106 @@
+server:
+  port: 8083
+
+spring:
+  application:
+    name: api-gateway
+  
+  # Gateway Configuration
+  cloud:
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      
+      routes:
+        # Client Service Routes
+        - id: client-service-routes
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/clients/**
+            - Path=/api/v1/auth/**
+          filters: []
+        
+        # Admin Routes (Client Service)
+        - id: admin-routes
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/admin/**
+          filters: []
+        
+        # Banking Service Routes
+        - id: banking-service-routes
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/banking/**
+            - Path=/api/v1/accounts/**
+            - Path=/api/v1/transactions/**
+          filters: []
+        
+        # Audit Routes (Admin only)
+        - id: audit-routes
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/audit/**
+          filters: []
+
+  # Database configuration for audit logging
+  datasource:
+    url: jdbc:postgresql://localhost:5432/microbank
+    username: postgres
+    password: password@001
+    driver-class-name: org.postgresql.Driver
+  
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+# Management endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+  endpoint:
+    health:
+      show-details: always
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+
+# Logging
+logging:
+  level:
+    com.microbank.apigateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.security: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# JWT Configuration
+jwt:
+  secret: microbank-jwt-secret-key-2024-very-long-and-secure
+  expiration: 86400000 # 24 hours in milliseconds
+
+# Rate Limiting
+rate-limit:
+  default:
+    requests-per-minute: 60
+  auth:
+    requests-per-minute: 10
+  banking:
+    requests-per-minute: 100
+  admin:
+    requests-per-minute: 30

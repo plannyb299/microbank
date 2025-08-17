@@ -1,0 +1,115 @@
+server:
+  port: 8083
+
+spring:
+  main:
+    web-application-type: reactive
+  application:
+    name: api-gateway
+  
+  # Gateway Configuration
+  cloud:
+    gateway:
+      
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      
+      routes:
+        # Test Route - Simple echo service
+        - id: test-route
+          uri: http://httpbin.org/anything
+          predicates:
+            - Path=/test-route/**
+          filters: []
+        
+        # Test Client Service Direct Access
+        - id: test-client-direct
+          uri: http://localhost:8081/client-service
+          predicates:
+            - Path=/test-client/**
+          filters: []
+        
+        # Client Service Routes
+        - id: client-service-routes
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/clients/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /client-service/api/v1/${segment}
+        
+        # Auth Routes (Client Service)
+        - id: auth-routes
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/auth/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /client-service/api/v1/${segment}
+        
+        # Admin Routes (Client Service)
+        - id: admin-routes
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/v1/admin/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /client-service/api/v1/${segment}
+        
+        # Banking Service - Banking Routes
+        - id: banking-service-banking-routes
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/banking/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /banking-service/api/v1/${segment}
+        
+        # Banking Service - Accounts Routes
+        - id: banking-service-accounts-routes
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/accounts/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /banking-service/api/v1/${segment}
+        
+        # Banking Service - Transactions Routes
+        - id: banking-service-transactions-routes
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/transactions/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /banking-service/api/v1/${segment}
+        
+        # Audit Routes (Admin only)
+        - id: audit-routes
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/v1/audit/**
+          filters:
+            - RewritePath=/api/v1/(?<segment>.*), /banking-service/api/v1/${segment}
+
+
+# Management endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,gateway
+  endpoint:
+    health:
+      show-details: always
+
+# Logging
+logging:
+  level:
+    com.microbank.apigateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+    org.springframework.web.server: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# JWT Configuration
+jwt:
+  secret: microbank-jwt-secret-key-2024-very-long-and-secure
+  expiration: 86400000 # 24 hours in milliseconds
